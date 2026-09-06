@@ -1,0 +1,52 @@
+{
+  "issue": 16,
+  "execution": {
+    "started_at": "2026-09-05T12:05:54.847Z",
+    "completed_at": "2026-09-05T12:05:58.822Z",
+    "paid_request_count": 1,
+    "retries": 0,
+    "fallbacks": 0,
+    "parallel_calls": 0,
+    "continuous_runner": false
+  },
+  "proposal": {
+    "space": "balancer.eth",
+    "state": "closed",
+    "id": "0x9ae7a0f0d8bce7b1956f6cecba12d34c71e6cf38dfb48396aa543127fb7ec4b7",
+    "title": "[BIP-927] Revoke Unused V2 Vault Permissions from Deprecated Relayers",
+    "source_url": "https://snapshot.org/#/balancer.eth/proposal/0x9ae7a0f0d8bce7b1956f6cecba12d34c71e6cf38dfb48396aa543127fb7ec4b7",
+    "body_handling": "Exact body fetched immediately before execution and included unchanged; omitted from this public summary."
+  },
+  "preflight": {
+    "active_balancer_proposals": 0,
+    "route_verified_before_payment": true
+  },
+  "route": {
+    "miner_id": "91001",
+    "miner_name": "SarzOps Fraud Intelligence",
+    "intent": "FRAUD_DETECTION",
+    "method": "POST",
+    "path": "/fraud"
+  },
+  "payment": {
+    "cost_usd": 0.01,
+    "transaction": "0x52e6d05d810132714914bc14d3db22c46a4a6c5b3273121e3729beea1644868c"
+  },
+  "receipt": {
+    "signal_hash": "0x6c71211472bced98050f06f4b426ae5058a879471d4da1f5f98fd758743e00c0",
+    "readback_hash_match": true,
+    "status": "success",
+    "verified": true,
+    "algorithm": "keccak256",
+    "commitment": "payload"
+  },
+  "semantic_result": {
+    "is_suspicious": false,
+    "risk_score": 12,
+    "risk_level": "low",
+    "confidence": 0.6,
+    "verdict": "RECHECK",
+    "classification": "proposal-semantic structured result; closed proposal does not validate active-vote production behavior"
+  },
+  "sensitive_material": "omitted"
+}

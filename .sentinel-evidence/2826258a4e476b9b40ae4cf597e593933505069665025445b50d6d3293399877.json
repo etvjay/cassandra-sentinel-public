@@ -1,0 +1,31 @@
+{
+  "started_at": "2026-09-05T12:05:54.847Z",
+  "completed_at": "2026-09-05T12:05:58.822Z",
+  "request_key": "2826258a4e476b9b40ae4cf597e593933505069665025445b50d6d3293399877",
+  "miner_id": "91001",
+  "miner_name": "SarzOps Fraud Intelligence",
+  "miner_endpoint": {
+    "path": "/fraud",
+    "method": "POST",
+    "description": "Assess a fraud question: given a natural-language question about a fraud, scam, scheme, malicious actor, mechanism, incident, or enforcement outcome, return a concise, sourced factual answer (FRAUD_DETECTION).\n"
+  },
+  "intent": "FRAUD_DETECTION",
+  "status": 200,
+  "headers": {
+    "alt-svc": "h3=\":443\"; ma=86400",
+    "cf-cache-status": "DYNAMIC",
+    "cf-ray": "a3651adafe9a5eea-PDX",
+    "connection": "keep-alive",
+    "content-encoding": "br",
+    "content-type": "application/json; charset=utf-8",
+    "date": "Sat, 05 Sep 2026 12:05:58 GMT",
+    "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+    "payment-response": "[REDACTED]",
+    "report-to": "[REDACTED]",
+    "server": "cloudflare",
+    "transfer-encoding": "chunked",
+    "vary": "Origin, Origin"
+  },
+  "body": "{\"cost_usd\":0.01,\"duration_ms\":2042,\"miner_id\":\"91001\",\"miner_name\":\"SarzOps Fraud Intelligence\",\"result\":{\"confidence\":0.6,\"explanation\":\"is_suspicious: false, risk_score: 12, risk_level: low, rationale: The proposal simply revokes legacy relayer permissions on Balancer’s V2 vault across multiple chains, a standard security hardening measure. It lists specific contract addresses and chain IDs, references official Balancer documentation, and contains no request for funds, token transfers, or changes to economic parameters. No known malicious actors or financial incentives are involved, and the action aligns with Balancer’s ongoing V2 sunsetting roadmap. Consequently, the fraud risk is minimal.\",\"mode\":\"knowledge\",\"signal\":\"is_suspicious: false, risk_score: 12, risk_level: low, rationale: The proposal simply revokes legacy relayer permissions on Balancer’s V2 vault across multiple chains, a standard security hardening measure. It lists specific contract addresses and chain IDs, references official Balancer documentation, and contains no request for funds, token transfers, or changes to economic parameters. No known malicious actors or financial incentives are involved, and the action aligns with Balancer’s ongoing V2 sunsetting roadmap. Consequently, the fraud risk is minimal.\",\"source\":\"groq:openai/gpt-oss-120b\",\"verdict\":\"RECHECK\"},\"signal_hash\":\"0x6c71211472bced98050f06f4b426ae5058a879471d4da1f5f98fd758743e00c0\",\"timestamp\":\"2026-09-05T12:05:58.146040917Z\"}",
+  "note": "Exactly one paid request was authorized by the one-shot command."
+}
