@@ -10,34 +10,58 @@
  * miners" with a real on-chain artifact. No extra code needed beyond what
  * telegraph_client.ts already does.
  *
- * Layer 2 (our own addition, still an open decision): an explicit "flag
- * this governance proposal" write to whatever DAO/governance contract the
- * chosen document stream (PROJECT_SPEC.md Section 5.2) actually uses.
- * Telegraph does not provide this, it is not a documentation gap, it's a
- * real scope item that depends on picking a specific governance target.
+ * Layer 2 (our own addition) is intentionally not implemented for the
+ * selected Snapshot document stream. Snapshot spaces do not expose a common
+ * governance-contract flag write. Telegraph does not provide one either.
  * Do not implement this against a guessed contract interface.
  */
 
 import type { TriageDecision } from "../scoring/multi_miner_agreement";
 import type { GovernanceProposal } from "../ingest/governance_source";
-import type { AskResult } from "../scoring/telegraph_client";
+import {
+  verifySignal,
+  type AskResult,
+  type TelegraphSignalVerification,
+} from "../scoring/telegraph_client";
 
 export interface Layer1Receipt {
   signalHash: string;
   verifiedAt: string;
-  minerIds: string[];
+  minerId: string;
+  verification: unknown;
 }
 
 /**
- * Layer 1: just collects the receipts Sentinel already has from its paid
- * requests. This is real and buildable now, it doesn't need anything new.
+ * Layer 1: independently verifies every receipt Sentinel received from its
+ * paid requests. A timestamp is only attached after Telegraph's verification
+ * endpoint returns successfully.
  */
-export function collectLayer1Receipts(askResults: AskResult[]): Layer1Receipt {
-  return {
-    signalHash: askResults[0]?.signal_hash ?? "",
-    verifiedAt: new Date().toISOString(),
-    minerIds: askResults.map((r) => r.miner_id),
-  };
+export async function verifyLayer1Receipts(
+  askResults: AskResult[],
+  verifier: (signalHash: string) => Promise<TelegraphSignalVerification> = verifySignal
+): Promise<Layer1Receipt[]> {
+  if (askResults.length === 0) {
+    throw new Error("Cannot verify Layer 1 receipts without ask results.");
+  }
+
+  for (const result of askResults) {
+    if (!result.signal_hash?.trim()) {
+      throw new Error(`Cannot verify Layer 1 receipt for miner ${result.miner_id}: signal_hash is empty.`);
+    }
+  }
+
+  return Promise.all(
+    askResults.map(async (result) => {
+      const signalHash = result.signal_hash!;
+      const verification = await verifier(signalHash);
+      return {
+        signalHash,
+        verifiedAt: new Date().toISOString(),
+        minerId: result.miner_id,
+        verification,
+      };
+    })
+  );
 }
 
 export interface Layer2ActionResult {
@@ -47,22 +71,17 @@ export interface Layer2ActionResult {
 }
 
 /**
- * Layer 2: NOT IMPLEMENTED. Blocked on choosing a specific governance
- * contract/interface once the document stream (PROJECT_SPEC.md Section
- * 5.2) is finalized. This is a real product decision, not something to
- * guess your way past, different DAOs expose completely different
- * governance contract shapes (Governor Bravo-style, Snapshot + a custom
- * execution module, a bespoke contract, etc).
+ * Layer 2: NOT IMPLEMENTED. The selected Snapshot source has no universal
+ * contract interface for flags. A future Layer 2 requires an explicit new
+ * target and a verified interface.
  */
 export async function executeLayer2GovernanceFlag(
   _proposal: GovernanceProposal,
   _decision: TriageDecision
 ): Promise<Layer2ActionResult> {
   throw new Error(
-    "Not implemented: Layer 2 governance-contract flag action depends on " +
-    "which specific governance target Sentinel is built against. Decide " +
-    "the document stream/target contract first (PROJECT_SPEC.md Section " +
-    "5.2), then implement against that contract's real interface, never " +
-    "a guessed one."
+    "Not implemented: the selected Snapshot source does not expose a " +
+    "universal governance-contract flag action. A future integration needs " +
+    "an explicit target and verified contract interface."
   );
 }

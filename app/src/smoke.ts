@@ -1,101 +1,89 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
-import { discoverMiners } from "./scoring/telegraph_client.ts";
-import type { MinerCatalogEntry } from "./scoring/telegraph_client.ts";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import {
+  askMiner,
+  assertPaidRequestsEnabled,
+  discoverCompatibleMiners,
+  type AskResult,
+  type CompatibleMiner,
+  type TelegraphSignalVerification,
+} from "./scoring/telegraph_client";
+import { verifyLayer1Receipts, type Layer1Receipt } from "./onchain/action";
 
-const EVIDENCE_DIR = process.env.SENTINEL_EVIDENCE_DIR ?? ".sentinel-evidence";
-const LEDGER_PATH = `${EVIDENCE_DIR}/paid-smoke-ledger.json`;
-const SENSITIVE_HEADERS = /authorization|payment|signature|cookie|secret|token|api[-_]?key/i;
-
-export function assertPaidSmokeOptIn(env: NodeJS.ProcessEnv, args: string[]): void {
-  if (env.SENTINEL_ALLOW_PAID_REQUESTS !== "true") {
-    throw new Error("Refusing paid smoke test: SENTINEL_ALLOW_PAID_REQUESTS=true is required.");
-  }
-  if (!args.includes("--confirm-paid-smoke")) {
-    throw new Error("Refusing paid smoke test: --confirm-paid-smoke is required.");
-  }
+export interface SentinelSmokeEvidence {
+  recordedAt: string;
+  minerId: string;
+  minerSlug: string;
+  endpoint: string;
+  signalHash: string;
+  costUsd: number;
+  durationMs: number;
+  verifiedAt: string;
+  verification: { algorithm: string; commitment: string };
 }
 
-function arg(args: string[], name: string): string {
-  const i = args.indexOf(name);
-  if (i < 0 || !args[i + 1]) throw new Error(`Missing required argument ${name} <value>.`);
-  return args[i + 1];
+export interface SmokeDependencies {
+  discover: (intent: "FRAUD_DETECTION") => Promise<CompatibleMiner[]>;
+  ask: (miner: CompatibleMiner, query: string) => Promise<AskResult>;
+  verify: (results: AskResult[]) => Promise<Layer1Receipt[]>;
 }
 
-function redactHeaders(headers: Headers): Record<string, string> {
-  const out: Record<string, string> = {};
-  headers.forEach((value, key) => {
-    out[key] = SENSITIVE_HEADERS.test(key) ? "[REDACTED]" : value;
-  });
-  return out;
-}
+const DEFAULT_EVIDENCE_PATH = ".sentinel-evidence/layer1-smoke.json";
 
-async function readLedger(): Promise<Record<string, unknown>> {
-  try { return JSON.parse(await readFile(LEDGER_PATH, "utf8")); }
-  catch { return {}; }
-}
-
-export async function runPaidSmoke(args: string[]): Promise<void> {
-  assertPaidSmokeOptIn(process.env, args);
-  const minerId = arg(args, "--miner-id");
-  const query = arg(args, "--query");
-
-  const miners = await discoverMiners("FRAUD_DETECTION");
-  const compatible: MinerCatalogEntry[] = miners.filter((m) =>
-    (m.activation_status === "active" || m.status === "active") &&
-    (m.supported_intents ?? m.intents ?? []).includes("FRAUD_DETECTION")
+/** Selects only the two reviewed proposal-semantic routes, in priority order. */
+export function selectProposalSmokeMiner(miners: CompatibleMiner[], query: string): CompatibleMiner {
+  const isProposalRoute = (miner: CompatibleMiner): boolean =>
+    miner.endpoint.method === "POST" &&
+    (miner.endpoint.description?.toUpperCase().includes("FRAUD_DETECTION") ?? false);
+  const sarzOps = miners.find((miner) =>
+    isProposalRoute(miner) && (miner.id === "91001" || miner.slug === "sarzops-transaction-risk") &&
+    miner.endpoint.path === "/fraud"
   );
-  if (compatible.length < 3) {
-    throw new Error(`Preflight blocked: found ${compatible.length} compatible active FRAUD_DETECTION miners; need at least 3.`);
-  }
-  const selected = compatible.find((m) => m.id === minerId);
-  if (!selected) throw new Error(`Preflight blocked: ${minerId} is not a declared compatible active miner.`);
-  const endpoint = selected.endpoints?.find((e) =>
-    e.description?.includes("FRAUD_DETECTION") || e.path.toLowerCase().includes("fraud")
+  if (sarzOps) return sarzOps;
+
+  const queryLength = [...query].length;
+  const txLens = miners.find((miner) =>
+    isProposalRoute(miner) && (miner.id === "9002" || miner.slug === "txlens") &&
+    miner.endpoint.path === "/fraud-query"
   );
-  if (!endpoint) throw new Error(`Preflight blocked: ${minerId} has no declared FRAUD_DETECTION endpoint.`);
+  if (txLens && queryLength <= 1000) return txLens;
 
-  const ledger = await readLedger();
-  const requestKey = createHash("sha256").update(`${minerId}\n${query}`).digest("hex");
-  if ((ledger[requestKey] as { paid?: boolean } | undefined)?.paid) throw new Error(`Refusing repeat paid smoke request: ${requestKey}.`);
+  throw new Error(
+    txLens
+      ? "No proposal-semantic smoke route is available for this query length."
+      : "No reviewed proposal-semantic FRAUD_DETECTION route is available; refusing to spend."
+  );
+}
 
-  const { wrapFetchWithPaymentFromConfig } = await import("@x402/fetch");
-  const { ExactEvmScheme } = await import("@x402/evm");
-  const { privateKeyToAccount } = await import("viem/accounts");
-  const key = process.env.EVM_PRIVATE_KEY;
-  if (!key?.startsWith("0x")) throw new Error("EVM_PRIVATE_KEY is required and must be 0x-prefixed.");
-  const account = privateKeyToAccount(key as `0x${string}`);
-  const paidFetch = wrapFetchWithPaymentFromConfig(fetch, {
-    schemes: [{ network: "eip155:84532", client: new ExactEvmScheme(account) }],
-  });
+/** Runs exactly one explicitly authorized request. It is not a traffic generator or loop. */
+export async function runSentinelSmoke(
+  query: string,
+  env: NodeJS.ProcessEnv = process.env,
+  dependencies: SmokeDependencies = { discover: discoverCompatibleMiners, ask: askMiner, verify: verifyLayer1Receipts },
+  evidencePath = env.SENTINEL_SMOKE_EVIDENCE ?? DEFAULT_EVIDENCE_PATH
+): Promise<SentinelSmokeEvidence> {
+  if (!query.trim()) throw new Error("SENTINEL_SMOKE_QUERY must be a non-empty query.");
+  assertPaidRequestsEnabled(env);
+  const miners = await dependencies.discover("FRAUD_DETECTION");
+  if (miners.length === 0) throw new Error("No compatible active FRAUD_DETECTION miner is available for the smoke test.");
 
-  const startedAt = new Date().toISOString();
-  const response = await paidFetch(`${process.env.TELEGRAPH_NODE_URL ?? "https://devnode.telegraphprotocol.com"}/engine/v1/ask/${minerId}`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ method: endpoint.method, endpoint: endpoint.path, payload: { query } }),
-  });
-  const body = await response.text();
-  const evidence = {
-    started_at: startedAt,
-    completed_at: new Date().toISOString(),
-    request_key: requestKey,
-    miner_id: minerId,
-    miner_name: selected.name,
-    miner_endpoint: endpoint,
-    intent: "FRAUD_DETECTION",
-    status: response.status,
-    headers: redactHeaders(response.headers),
-    body,
-    note: "Exactly one paid request was authorized by the one-shot command.",
+  // Deliberately select one reviewed semantic route and make one request. Do not add retries.
+  const miner = selectProposalSmokeMiner(miners, query);
+  const result = await dependencies.ask(miner, query);
+  const [receipt] = await dependencies.verify([result]);
+  const verification = receipt.verification as TelegraphSignalVerification;
+  const record: SentinelSmokeEvidence = {
+    recordedAt: new Date().toISOString(),
+    minerId: result.miner_id,
+    minerSlug: miner.slug,
+    endpoint: `${miner.endpoint.method} ${miner.endpoint.path}`,
+    signalHash: receipt.signalHash,
+    costUsd: result.cost_usd,
+    durationMs: result.duration_ms,
+    verifiedAt: receipt.verifiedAt,
+    verification: { algorithm: verification.verification.algorithm, commitment: verification.verification.commitment },
   };
-  await mkdir(EVIDENCE_DIR, { recursive: true });
-  await writeFile(`${EVIDENCE_DIR}/${requestKey}.json`, JSON.stringify(evidence, null, 2));
-  ledger[requestKey] = { miner_id: minerId, created_at: startedAt, evidence: `${requestKey}.json`, paid: response.ok };
-  await writeFile(LEDGER_PATH, JSON.stringify(ledger, null, 2));
-  if (!response.ok) throw new Error(`Paid smoke request failed: HTTP ${response.status}; evidence saved.`);
-  console.log(JSON.stringify({ status: response.status, miner_id: minerId, evidence: `${EVIDENCE_DIR}/${requestKey}.json`, request_key: requestKey }));
-}
-
-if (process.argv[1]?.endsWith("app/src/smoke.ts")) {
-  runPaidSmoke(process.argv.slice(2)).catch((error: Error) => { console.error(error.message); process.exitCode = 1; });
+  await mkdir(dirname(evidencePath), { recursive: true });
+  await writeFile(evidencePath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  return record;
 }

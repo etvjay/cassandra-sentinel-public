@@ -1,18 +1,20 @@
-import { discoverMiners } from "./scoring/telegraph_client.ts";
+import { MIN_MINER_SAMPLE_SIZE } from "./scoring/multi_miner_agreement";
+import { discoverCompatibleMiners } from "./scoring/telegraph_client";
 
-async function main(): Promise<void> {
-  const miners = await discoverMiners("FRAUD_DETECTION");
-  const compatible = miners.filter((m) =>
-    (m.activation_status === "active" || m.status === "active") &&
-    (m.supported_intents ?? m.intents ?? []).includes("FRAUD_DETECTION")
-  );
-  console.log(JSON.stringify({
-    intent: "FRAUD_DETECTION",
-    active_compatible_miners: compatible.length,
-    miners: compatible.map(({ id, name, min_price_usdc, status }) => ({ id, name, min_price_usdc, status })),
-    pass: compatible.length >= 3,
-  }, null, 2));
-  if (compatible.length < 3) process.exitCode = 1;
+export interface SentinelPreflight {
+  requiredMinerCount: number;
+  compatibleMinerCount: number;
+  ready: boolean;
+  miners: Array<{ id: string; slug: string; endpoint: string }>;
 }
 
-main().catch((error: Error) => { console.error(error.message); process.exitCode = 1; });
+/** Free registry-only readiness check. It never sends inference or payment traffic. */
+export async function runSentinelPreflight(): Promise<SentinelPreflight> {
+  const miners = await discoverCompatibleMiners("FRAUD_DETECTION");
+  return {
+    requiredMinerCount: MIN_MINER_SAMPLE_SIZE,
+    compatibleMinerCount: miners.length,
+    ready: miners.length >= MIN_MINER_SAMPLE_SIZE,
+    miners: miners.map((miner) => ({ id: miner.id, slug: miner.slug, endpoint: miner.endpoint.path })),
+  };
+}
